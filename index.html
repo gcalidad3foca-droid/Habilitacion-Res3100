@@ -207,6 +207,12 @@ button.ri.on{background:var(--card);box-shadow:var(--sh-1),0 0 0 1px var(--line)
 .sec-res{font-size:14px;color:var(--muted);display:flex;align-items:center;gap:10px}
 .sec-res b{font-weight:800;font-size:22px;font-variant-numeric:tabular-nums;color:var(--muted)}
 
+.row.parent{grid-template-columns:58px minmax(0,1fr);background:var(--wash);padding-block:18px 16px}
+.row.parent:hover{background:var(--wash)}
+.row.parent .txt{font-weight:600;color:var(--ink)}
+.row.parent .acts{margin-top:12px}
+.row.parent+.row{border-top-color:transparent}
+
 /* ── Resultados ───────────────────────────────────────── */
 .results{margin-top:36px}
 .results h2.big{font-weight:800;font-size:28px;margin:0 0 18px;color:var(--ink);letter-spacing:-.03em}
@@ -715,6 +721,13 @@ SECTIONS.forEach(s => {
   });
 });
 ITEMS.forEach(it => { if (it.parent) BY[it.parent].children.push(it.id); });
+/* Los ítems con subítems son solo encabezado: se califican únicamente los subítems (hojas). */
+const RATED = ITEMS.filter(it => !it.children.length);
+ITEMS.forEach(it => { it.isParent = it.children.length > 0; it.ridx = -1; });
+RATED.forEach((it, i) => { it.ridx = i; });
+SECTIONS.forEach(s => { s.count = RATED.filter(it => it.sid === s.id).length; });
+function leafDesc(id) { return descendants(id).filter(x => !BY[x].isParent); }
+function purgeParentMarks() { ITEMS.forEach(it => { if (it.isParent) delete S.marks[it.id]; }); }
 function descendants(id) { const out = []; (function walk(x) { BY[x].children.forEach(c => { out.push(c); walk(c); }); })(id); return out; }
 function ancestors(id) { const out = []; let p = BY[id].parent; while (p) { out.push(p); p = BY[p].parent; } return out; }
 const clip = (s, n) => { s = String(s).replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s; };
@@ -767,7 +780,7 @@ let SET = { groq: '', doc: { codigo: '', version: '', vigencia: '' } };
 function readJSON(k, fb) { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : fb; } catch (e) { return fb; } }
 function loadState() {
   const d = readJSON(LS.draft, null);
-  if (d && d.v === 1) { S = Object.assign(blankState(), d); S.meta = Object.assign(blankState().meta, d.meta || {}); delete S.rec; return true; }
+  if (d && d.v === 1) { S = Object.assign(blankState(), d); S.meta = Object.assign(blankState().meta, d.meta || {}); delete S.rec; purgeParentMarks(); return true; }
   return false;
 }
 function loadSettings() { const s = readJSON(LS.set, null); if (s) SET = { groq: s.groq || '', doc: Object.assign({ codigo: '', version: '', vigencia: '' }, s.doc || {}) }; }
@@ -838,7 +851,7 @@ const RISK_TX = { bajo: 'Riesgo bajo', medio: 'Riesgo medio', alto: 'Riesgo alto
 function stats() {
   const secs = SECTIONS.map(s => ({ id: s.id, name: s.name, short: s.short, total: s.count, c: 0, nc: 0, na: 0, pend: 0, pct: null, w: 0 }));
   const bySec = {}; secs.forEach(x => bySec[x.id] = x);
-  ITEMS.forEach(it => { const m = S.marks[it.id], x = bySec[it.sid]; if (m === 'C') x.c++; else if (m === 'NC') x.nc++; else if (m === 'NA') x.na++; else x.pend++; });
+  RATED.forEach(it => { const m = S.marks[it.id], x = bySec[it.sid]; if (m === 'C') x.c++; else if (m === 'NC') x.nc++; else if (m === 'NA') x.na++; else x.pend++; });
   let C = 0, NC = 0, NA = 0, P = 0;
   secs.forEach(x => { C += x.c; NC += x.nc; NA += x.na; P += x.pend; const e = x.c + x.nc; x.pct = e ? Math.round(x.c / e * 100) : null; });
   const E = C + NC; secs.forEach(x => { x.w = E ? (x.c + x.nc) / E : 0; });
@@ -848,6 +861,17 @@ function stats() {
 
 /* ── Construcción de la interfaz ─────────────────────────────── */
 function rowHTML(it) {
+  if (it.isParent) {
+    return `<article class="row parent" id="r-${it.id}" data-id="${it.id}" data-d="${Math.min(it.depth, 4)}">
+    <div class="num">${esc(it.num)}</div>
+    <div class="body">
+      <p class="txt">${esc(it.text)}</p>
+      <div class="acts">
+        <button type="button" class="cb kid" data-act="kids" title="Aplicar una calificación a todos los subítems">${ico('layers')}<span>Calificar subítems <b data-kp></b></span></button>
+      </div>
+    </div>
+  </article>`;
+  }
   return `<article class="row" id="r-${it.id}" data-id="${it.id}" data-d="${Math.min(it.depth, 4)}">
     <div class="num">${esc(it.num)}</div>
     <div class="body">
@@ -856,7 +880,6 @@ function rowHTML(it) {
         <button type="button" class="cb" data-act="ev" title="Evidencia fotográfica">${ico('camera')}<span data-l="ev">Foto</span></button>
         <button type="button" class="cb" data-act="om" title="Oportunidad de mejora">${ico('bulb')}<span data-l="om">OM</span></button>
         <button type="button" class="cb" data-act="obs" title="Observación">${ico('msg')}<span>Observación</span></button>
-        ${it.kids ? `<button type="button" class="cb kid" data-act="kids" title="Aplicar una calificación a todos los subítems">${ico('layers')}<span>Subítems <b data-kp></b></span></button>` : ''}
       </div>
       <div data-obsbox></div>
     </div>
@@ -895,8 +918,8 @@ function railHTML() {
 /* Cinta métrica */
 function buildTape() {
   const t = $('#ticks'); t.innerHTML = '';
-  ITEMS.forEach((it, i) => {
-    const e = document.createElement('i'); e.className = 'tick' + (i > 0 && it.sid !== ITEMS[i - 1].sid ? ' gap' : ''); e.dataset.i = i; t.appendChild(e);
+  RATED.forEach((it, i) => {
+    const e = document.createElement('i'); e.className = 'tick' + (i > 0 && it.sid !== RATED[i - 1].sid ? ' gap' : ''); e.dataset.i = i; t.appendChild(e);
   });
   positionMarks();
 }
@@ -904,7 +927,7 @@ function positionMarks() {
   const ticks = $$('#ticks .tick'); if (!ticks.length) return;
   const m = $('#marks'); m.innerHTML = ''; let lastX = -99;
   SECTIONS.forEach(s => {
-    const first = s.groups[0].items[0]; const el = ticks[first.idx]; if (!el) return;
+    const first = RATED.find(x => x.sid === s.id); const el = first && ticks[first.ridx]; if (!el) return;
     if (el.offsetLeft - lastX < 30) return; lastX = el.offsetLeft;
     const sp = document.createElement('span'); sp.textContent = first.num; sp.style.left = el.offsetLeft + 'px'; m.appendChild(sp);
   });
@@ -919,7 +942,13 @@ function placeHere() {
 /* ── Actualización de filas ──────────────────────────────────── */
 function refreshRow(id) {
   const row = document.getElementById('r-' + id); if (!row) return;
-  const it = BY[id], m = S.marks[id] || '';
+  const it = BY[id];
+  if (it.isParent) {
+    const leaves = leafDesc(id), rated = leaves.filter(c => S.marks[c]).length, kp = $('[data-kp]', row);
+    if (kp) kp.textContent = rated + '/' + leaves.length;
+    return;
+  }
+  const m = S.marks[id] || '';
   row.dataset.s = m;
   $$('.rate button', row).forEach(b => b.setAttribute('aria-checked', String(b.dataset.v === m)));
   // Foto
@@ -936,11 +965,6 @@ function refreshRow(id) {
   if (ob) box.innerHTML = `<button type="button" class="obsline" data-act="obs" title="Editar observación">${esc(ob)}</button>`;
   else if (m === 'NC') box.innerHTML = `<button type="button" class="need" data-act="obs">${ico('alert')}Observación obligatoria para No cumple</button>`;
   else box.innerHTML = '';
-  // Subítems
-  if (it.kids) {
-    const kp = $('[data-kp]', row); const rated = it.children.filter(c => S.marks[c]).length;
-    kp.textContent = rated + '/' + it.children.length;
-  }
 }
 function refreshKey(key) {
   if (BY[key]) refreshRow(key);
@@ -948,11 +972,13 @@ function refreshKey(key) {
 }
 
 function setMark(id, v) {
+  if (BY[id].isParent) return;
   if (S.marks[id] === v) delete S.marks[id]; else S.marks[id] = v;
   refreshRow(id); ancestors(id).forEach(refreshRow);
   touch(); queueSummary();
 }
 function bulkMark(ids, v, onlyPending) {
+  ids = ids.filter(id => !BY[id].isParent);
   const before = {}; let n = 0;
   ids.forEach(id => {
     if (onlyPending && S.marks[id]) return;
@@ -980,7 +1006,7 @@ function updateSummary() {
   const st = stats();
   // Cinta
   const ticks = $$('#ticks .tick');
-  ITEMS.forEach((it, i) => { const t = ticks[i]; if (t) { const m = S.marks[it.id] || ''; if (t.dataset.s !== m) t.dataset.s = m; } });
+  RATED.forEach((it, i) => { const t = ticks[i]; if (t) { const m = S.marks[it.id] || ''; if (t.dataset.s !== m) t.dataset.s = m; } });
   const score = $('#tScore'), risk = $('#tRisk');
   if (!st.E) { score.textContent = '0%'; score.className = ''; risk.textContent = 'Sin evaluar'; risk.className = ''; }
   else { const r = riskOf(st.adj); score.textContent = st.adj + '%'; score.className = 'risk-' + r; risk.textContent = RISK_TX[r]; risk.className = 'risk-' + r; }
@@ -1036,7 +1062,7 @@ function buildFilterChips() {
   $('#fseg').innerHTML = FCHIPS.map(([k, l]) => `<button type="button" class="fchip" data-f="${k}" aria-pressed="${F.s === k}">${l}<b data-fc="${k}">0</b></button>`).join('');
 }
 function updateFilterCounts(st) {
-  const v = { all: ITEMS.length, P: st.P, C: st.C, NC: st.NC, NA: st.NA };
+  const v = { all: RATED.length, P: st.P, C: st.C, NC: st.NC, NA: st.NA };
   Object.keys(v).forEach(k => { const e = $('[data-fc="' + k + '"]'); if (e) e.textContent = v[k]; });
 }
 function applyFilters() {
@@ -1044,11 +1070,19 @@ function applyFilters() {
   document.body.classList.toggle('filtering', active);
   let any = false;
   const vis = {};
-  ITEMS.forEach(it => {
+  const okMap = {};
+  RATED.forEach(it => {
     const m = S.marks[it.id] || '';
     let ok = true;
     if (F.s === 'P') ok = !m; else if (F.s !== 'all') ok = m === F.s;
     if (ok && q) ok = norm(it.num + ' ' + it.text).includes(q);
+    okMap[it.id] = ok;
+  });
+  ITEMS.forEach(it => {
+    let ok;
+    if (!it.isParent) ok = okMap[it.id];
+    else if (!active) ok = true;
+    else { ok = leafDesc(it.id).some(c => okMap[c]); if (!ok && q && F.s === 'all') ok = norm(it.num + ' ' + it.text).includes(q); }
     const row = document.getElementById('r-' + it.id); if (row) row.hidden = !ok;
     if (ok) { any = true; vis[it.sid] = (vis[it.sid] || 0) + 1; vis[it.gkey] = (vis[it.gkey] || 0) + 1; }
   });
@@ -1062,7 +1096,7 @@ function applyFilters() {
 
 /* ── Navegación: ir a un criterio, cinta, rail, scroll spy ───── */
 function goTo(idx) {
-  const it = ITEMS[Math.max(0, Math.min(ITEMS.length - 1, idx))];
+  const it = RATED[Math.max(0, Math.min(RATED.length - 1, idx))];
   const sec = document.getElementById('sec-' + it.sid);
   if (F.q || F.s !== 'all') { F.q = ''; F.s = 'all'; $('#q').value = ''; applyFilters(); }
   if (sec.classList.contains('collapsed')) toggleSection(it.sid, false);
@@ -1085,12 +1119,12 @@ function goSection(sid) {
 }
 function initRuler() {
   const ruler = $('#ruler'), tip = $('#rtip'); let down = false, lastHot = null;
-  const idxAt = x => { const r = $('#ticks').getBoundingClientRect(); return Math.max(0, Math.min(ITEMS.length - 1, Math.floor((x - r.left) / r.width * ITEMS.length))); };
+  const idxAt = x => { const r = $('#ticks').getBoundingClientRect(); return Math.max(0, Math.min(RATED.length - 1, Math.floor((x - r.left) / r.width * RATED.length))); };
   const hot = e => {
     const i = idxAt(e.clientX), ticks = $$('#ticks .tick');
     if (lastHot != null && ticks[lastHot]) ticks[lastHot].classList.remove('hot');
     lastHot = i; ticks[i].classList.add('hot');
-    const it = ITEMS[i], m = S.marks[it.id];
+    const it = RATED[i], m = S.marks[it.id];
     tip.textContent = it.num + '. ' + clip(it.text, 70) + ' (' + (m ? MARK_LABEL[m] : 'pendiente') + ')';
     const rr = ruler.getBoundingClientRect();
     tip.style.left = Math.max(130, Math.min(window.innerWidth - 130, e.clientX)) + 'px'; tip.style.top = (rr.bottom + 10) + 'px'; tip.classList.add('on');
@@ -1108,8 +1142,8 @@ function initSpy() {
   if (!('IntersectionObserver' in window)) return;
   const seen = new Set();
   const io = new IntersectionObserver(es => {
-    es.forEach(e => { const i = ITEMS.findIndex(x => x.id === e.target.dataset.id); if (e.isIntersecting) seen.add(i); else seen.delete(i); });
-    if (seen.size) { curIdx = Math.min(...seen); placeHere(); const sid = ITEMS[curIdx].sid; $$('.rail .ri').forEach(b => b.classList.toggle('on', b.dataset.sec === sid)); }
+    es.forEach(e => { const it = BY[e.target.dataset.id]; const i = it.isParent ? Math.max(0, RATED.findIndex(x => x.parent === it.id || ancestors(x.id).includes(it.id))) : it.ridx; if (e.isIntersecting) seen.add(i); else seen.delete(i); });
+    if (seen.size) { curIdx = Math.min(...seen); placeHere(); const sid = RATED[curIdx].sid; $$('.rail .ri').forEach(b => b.classList.toggle('on', b.dataset.sec === sid)); }
   }, { rootMargin: '-90px 0px -62% 0px' });
   $$('.row').forEach(r => io.observe(r));
 }
@@ -1467,7 +1501,7 @@ function downloadBlob(blob, name) {
 }
 async function loadFromPayload(state, evidence) {
   S = Object.assign(blankState(), state); S.meta = Object.assign(blankState().meta, state.meta || {});
-  delete S.rec; await clearEvIDB(); EV = evidence || {}; for (const k of Object.keys(EV)) await saveEv(k);
+  delete S.rec; purgeParentMarks(); await clearEvIDB(); EV = evidence || {}; for (const k of Object.keys(EV)) await saveEv(k);
   dirty = true; flush(); renderAll();
 }
 
@@ -1547,6 +1581,7 @@ function listTableBody() {
     s.groups.forEach(g => {
       if (g.name) body.push([{ content: g.name, colSpan: 6, styles: { fillColor: [232, 238, 248], textColor: NAVY, fontStyle: 'bold', halign: 'left' } }]);
       g.items.forEach(it => {
+        if (it.isParent) { body.push([{ content: it.num, styles: { fontStyle: 'bold', textColor: NAVY, fillColor: [246, 248, 251] } }, { content: it.text.replace(/\s*\n\s*/g, ' '), colSpan: 5, styles: { fontStyle: 'bold', fillColor: [246, 248, 251] } }]); return; }
         const m = S.marks[it.id] || '';
         const obs = (S.obs[it.id] || '').trim();
         body.push([{ content: it.num, styles: { fontStyle: 'bold', textColor: NAVY } }, it.text.replace(/\s*\n\s*/g, ' '),
@@ -1653,7 +1688,7 @@ async function generateReport() {
   const rf = $('#repFecha').value, rm = $('#repMes').value, al = $('#repLider').value, det = $('#repDet').value;
   if (!rf || !rm || !al) { toast('Complete todos los campos del informe.', 'err'); return; }
   const missing = ITEMS.filter(it => S.marks[it.id] === 'NC' && !(S.obs[it.id] || '').trim());
-  if (missing.length) { $('#dRep').close(); toast(missing.length + ' criterio(s) No cumple sin observación.', 'err'); goTo(missing[0].idx); return; }
+  if (missing.length) { $('#dRep').close(); toast(missing.length + ' criterio(s) No cumple sin observación.', 'err'); goTo(missing[0].ridx); return; }
   $('#dRep').close();
   try {
     loading(true, 'Generando informe completo…', 'Construyendo las páginas'); await nextFrame(); await sleep(60);
@@ -1775,7 +1810,7 @@ function exportXlsx() {
   if (!window.XLSX) { toast('No se pudo cargar el componente de Excel. Revise la conexión.', 'err'); return; }
   const rows = [['Sección', 'Grupo', 'N.º', 'Criterio', 'Calificación', 'Observación', 'Fotos', 'Oportunidades de mejora']];
   SECTIONS.forEach(s => {
-    s.groups.forEach(g => g.items.forEach(it => rows.push([s.name, g.name || '', it.num, it.text.replace(/\s*\n\s*/g, ' '), S.marks[it.id] ? (S.marks[it.id] === 'NA' ? 'N/A' : S.marks[it.id]) : 'Sin evaluar', S.obs[it.id] || '', (EV[it.id] || []).length, (S.om[it.id] || []).join(' | ')])));
+    s.groups.forEach(g => g.items.forEach(it => rows.push([s.name, g.name || '', it.num, it.text.replace(/\s*\n\s*/g, ' '), it.isParent ? 'Encabezado' : S.marks[it.id] ? (S.marks[it.id] === 'NA' ? 'N/A' : S.marks[it.id]) : 'Sin evaluar', S.obs[it.id] || '', (EV[it.id] || []).length, (S.om[it.id] || []).join(' | ')])));
     (S.ha[s.id] || []).forEach((h, i) => rows.push([s.name, 'Hallazgo adicional', 'HA' + (i + 1), h.text, h.cal === 'NA' ? 'N/A' : h.cal, '', (EV[h.id] || []).length, (S.om[h.id] || []).join(' | ')]));
   });
   const st = stats();
@@ -1847,13 +1882,13 @@ function init() {
     else if (act === 'om') openOm(id, itemLabel(BY[id]));
     else if (act === 'ha') openHa(a.dataset.sec);
     else if (act === 'kids') {
-      const ids = descendants(id);
+      const ids = leafDesc(id);
       openPop(a, [{ label: 'Todos los subítems: Cumple', icon: 'check', fn: () => bulkMark(ids, 'C') }, { label: 'Todos los subítems: No cumple', icon: 'x', fn: () => bulkMark(ids, 'NC') }, { label: 'Todos los subítems: No aplica', icon: 'list', fn: () => bulkMark(ids, 'NA') }, '-', { label: 'Limpiar calificación de subítems', icon: 'undo', fn: () => bulkMark(ids, null) }]);
     }
     else if (act === 'secmenu' || act === 'grpmenu') {
       let ids, nm;
-      if (act === 'secmenu') { const s = SEC[a.closest('.sec').dataset.sec]; ids = ITEMS.filter(i => i.sid === s.id).map(i => i.id); nm = 'la sección'; }
-      else { ids = ITEMS.filter(i => i.gkey === a.dataset.g).map(i => i.id); nm = 'el grupo'; }
+      if (act === 'secmenu') { const s = SEC[a.closest('.sec').dataset.sec]; ids = RATED.filter(i => i.sid === s.id).map(i => i.id); nm = 'la sección'; }
+      else { ids = RATED.filter(i => i.gkey === a.dataset.g).map(i => i.id); nm = 'el grupo'; }
       openPop(a, [{ label: 'Marcar pendientes como Cumple', icon: 'check', fn: () => bulkMark(ids, 'C', true) }, { label: 'Marcar pendientes como No aplica', icon: 'list', fn: () => bulkMark(ids, 'NA', true) }, '-', { label: 'Limpiar ' + nm, icon: 'undo', cls: 'dng', fn: async () => { if (await confirmBox('Limpiar calificaciones', 'Se quitará la calificación de todos los criterios de ' + nm + '. Podrá deshacerlo desde el aviso.', 'Limpiar')) bulkMark(ids, null); } }]);
     }
   });
@@ -1877,7 +1912,7 @@ function init() {
     const t = e.target; if (t.matches('input,textarea,select') || t.isContentEditable) return;
     const row = t.closest && t.closest('.row'); if (!row) return;
     const k = e.key.toLowerCase(), map = { c: 'C', n: 'NC', a: 'NA' };
-    if (map[k] && !t.closest('.rate')) { e.preventDefault(); setMark(row.dataset.id, map[k]); }
+    if (map[k] && !t.closest('.rate') && !BY[row.dataset.id].isParent) { e.preventDefault(); setMark(row.dataset.id, map[k]); }
   });
 
   const tape = $('#tape'); const stick = () => tape.classList.toggle('stuck', tape.getBoundingClientRect().top <= 0.5);
